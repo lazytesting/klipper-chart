@@ -1,0 +1,7 @@
+[update_manager ender3]
+type: git_repo
+channel: dev
+path: ~/printer_data/config/ender3
+origin: @ORIGIN@
+primary_branch: @BRANCH@
+is_system_service: False

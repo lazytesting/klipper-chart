@@ -1,0 +1,10 @@
+/printer.cfg
+/printer-*.cfg
+/printer_autosave.cfg
+/moonraker.conf
+/ender3-update.conf
+*.key
+*.pem
+id_ed25519*
+*_deploy
+*.pub

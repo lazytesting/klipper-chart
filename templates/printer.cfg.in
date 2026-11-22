@@ -1,0 +1,14 @@
+# Local entry point. Keep calibration seeds here so SAVE_CONFIG can replace them.
+[include ender3/config/printer-managed.cfg]
+
+[mcu]
+serial: @SERIAL@
+
+[bltouch]
+z_offset: @Z_OFFSET@
+
+[extruder]
+control: watermark
+
+[heater_bed]
+control: watermark
