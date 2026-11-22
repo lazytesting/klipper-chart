@@ -35,31 +35,17 @@ Record the confirmed fixed settings in `config/hardware/` and merge them into `m
 
 [Creality V4.2.7 pin map](https://github.com/Klipper3d/klipper/blob/master/config/generic-creality-v4.2.7.cfg) · [Sprite reference](https://github.com/Klipper3d/klipper/blob/master/config/printer-creality-ender3-s1-2021.cfg) · [KevinAkaSam belt conversion](https://github.com/kevinakasam/BeltDrivenEnder3) · [Rotation distance](https://www.klipper3d.org/Rotation_Distance.html) · [BLTouch checks](https://www.klipper3d.org/BLTouch.html)
 
-## 2. Give the Pi read-only access
+## 2. Verify public HTTPS access from the Pi
 
-Run these commands over SSH on the Pi as the account that runs Moonraker. Confirm the account with `systemctl show moonraker -p User`. The installation scripts assume the standard single-instance service names and both services using this account's `~/printer_data`. Verify with `systemctl cat klipper moonraker`.
+This repository is public. The install script and Moonraker use anonymous HTTPS, so the Pi needs no GitHub account, token or deploy key.
+
+Run the Pi commands as the account that runs Moonraker. Confirm the account with `systemctl show moonraker -p User`. The installation scripts assume the standard single-instance service names and both services using this account's `~/printer_data`. Verify with `systemctl cat klipper moonraker`.
 
 ```bash
-install -d -m 700 ~/.ssh
-ssh-keygen -t ed25519 -f ~/.ssh/ender3_deploy -C 'ender3-moonraker' -N ''
-cat ~/.ssh/ender3_deploy.pub
+GIT_TERMINAL_PROMPT=0 git ls-remote https://github.com/lazytesting/klipper-chart.git refs/heads/main
 ```
 
-Use a new dedicated key. If that filename already exists, inspect it before choosing whether to reuse it or create a differently named key. In the repository's **Settings → Deploy keys → Add deploy key**, paste the public key and leave **Allow write access** unchecked. Keep the private key on the Pi. Add this host block near the top of `~/.ssh/config` before broad matching entries, then set the file to mode `600`.
-
-```sshconfig
-Host github-ender3
-    HostName github.com
-    User git
-    IdentityFile ~/.ssh/ender3_deploy
-    IdentitiesOnly yes
-    BatchMode yes
-    StrictHostKeyChecking yes
-```
-
-If GitHub is new to this account, collect its Ed25519 host key with `ssh-keyscan -t ed25519 github.com > /tmp/ender3-github-hostkey`. Check the output of `ssh-keygen -lf /tmp/ender3-github-hostkey` against GitHub's published Ed25519 fingerprint before appending the file to `~/.ssh/known_hosts`. Then verify access with `git ls-remote git@github-ender3:lazytesting/klipper-chart.git refs/heads/main` as the Moonraker account. The SSH alias in this command must match the clone's `origin` and Moonraker's configured `origin`.
-
-[GitHub deploy keys](https://docs.github.com/en/authentication/connecting-to-github-with-ssh/managing-deploy-keys#deploy-keys) · [GitHub SSH host fingerprints](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/githubs-ssh-key-fingerprints)
+Use the same HTTPS URL for the checkout's `origin` and Moonraker's `origin` in `ender3-update.conf`. The installer sets both automatically.
 
 ## 3. Stage and install on the Pi
 
@@ -70,7 +56,7 @@ umask 077
 backup="$HOME/printer-config-before-ender3-$(date +%Y%m%d-%H%M%S).tar.gz"
 tar -czf "$backup" -C "$HOME/printer_data" config
 tar -tzf "$backup"
-git clone git@github-ender3:lazytesting/klipper-chart.git ~/ender3-bootstrap
+git clone https://github.com/lazytesting/klipper-chart.git ~/ender3-bootstrap
 ```
 
 Set `SERIAL` and `Z_OFFSET` in your shell from the verified current machine before running the next command. Use the working Z offset only for the same probe and nozzle geometry. With no valid previous offset, use `0` as a temporary seed, verify the trigger and first Z descent in person, and calibrate before printing.
@@ -113,7 +99,7 @@ After successful commissioning and after later calibration changes, take a snaps
 ~/printer_data/config/ender3/scripts/recovery.sh backup /path/to/existing/backup-parent
 ```
 
-After SD card failure, reinstall Klipper, Moonraker and Mainsail, recreate or verify the service account and data paths, and create a new read-only deploy key on the replacement Pi. Revoke the old key in GitHub if it is no longer in use. Clone `~/ender3-bootstrap` as in the installation instructions. Restore external symlink targets before starting services.
+After SD card failure, reinstall Klipper, Moonraker and Mainsail, recreate or verify the service account and data paths, and clone `~/ender3-bootstrap` over HTTPS as in the installation instructions. Recovery clones from the remote recorded in the snapshot. If the snapshot used the optional SSH setup, restore access to that remote first. Restore external symlink targets before starting services.
 
 ```bash
 ~/ender3-bootstrap/scripts/recovery.sh stage /path/to/ender3-snapshot.DIRECTORY
@@ -122,3 +108,29 @@ After SD card failure, reinstall Klipper, Moonraker and Mainsail, recreate or ve
 Review the restored `printer.cfg`, verify the new Pi's serial device and correct it locally if needed, inspect Moonraker includes and service paths, and leave the generated calibration block last. The recovery checkout uses the saved commit and keeps tracking the configured branch. A rewritten branch that has lost the saved commit requires recovering that commit or reviewing a fresh install and recalibration. Then stop both services, run `~/ender3-bootstrap/scripts/recovery.sh apply "$STAGE"` with the recovery stage path, start both services, and repeat the machine checks before resuming prints.
 
 For immediate rollback after a cutover, stop both services, move the active `~/printer_data/config` directory aside to a new path, then move the prior `config` directory from the printed `ender3-before.*` backup back to `~/printer_data/config`. Restart services after verifying the restored entry points. Preserve the displaced directory for diagnosis.
+
+## Optional SSH deploy key for a private repository
+
+Use this setup if you make the repository private and want the Pi to fetch with a dedicated read-only key. Run the commands as the Moonraker service user. Clone the bootstrap checkout with the SSH URL and pass that same URL to `install.sh stage` as its optional third argument after the serial path and Z offset.
+
+```bash
+install -d -m 700 ~/.ssh
+ssh-keygen -t ed25519 -f ~/.ssh/ender3_deploy -C 'ender3-moonraker' -N ''
+cat ~/.ssh/ender3_deploy.pub
+```
+
+Use a new dedicated key. If that filename already exists, inspect it before choosing whether to reuse it or create a differently named key. In the repository's **Settings → Deploy keys → Add deploy key**, paste the public key and leave **Allow write access** unchecked. Keep the private key on the Pi. Add this host block near the top of `~/.ssh/config` before broad matching entries, then set the file to mode `600`.
+
+```sshconfig
+Host github-ender3
+    HostName github.com
+    User git
+    IdentityFile ~/.ssh/ender3_deploy
+    IdentitiesOnly yes
+    BatchMode yes
+    StrictHostKeyChecking yes
+```
+
+If GitHub is new to this account, collect its Ed25519 host key with `ssh-keyscan -t ed25519 github.com > /tmp/ender3-github-hostkey`. Check the output of `ssh-keygen -lf /tmp/ender3-github-hostkey` against GitHub's published Ed25519 fingerprint before appending the file to `~/.ssh/known_hosts`. Then verify access with `git ls-remote git@github-ender3:lazytesting/klipper-chart.git refs/heads/main` as the Moonraker account. The SSH alias in this command must match the clone's `origin` and Moonraker's configured `origin`.
+
+[GitHub deploy keys](https://docs.github.com/en/authentication/connecting-to-github-with-ssh/managing-deploy-keys#deploy-keys) · [GitHub SSH host fingerprints](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/githubs-ssh-key-fingerprints)

@@ -3,7 +3,7 @@
 data_dir="$HOME/printer_data"
 active="$data_dir/config"
 checkout_name=ender3
-default_origin=git@github-ender3:lazytesting/klipper-chart.git
+default_origin=https://github.com/lazytesting/klipper-chart.git
 default_branch=main
 
 die() {
@@ -12,8 +12,10 @@ die() {
 }
 
 check_origin_and_branch() {
-    [[ $1 =~ ^git@github-ender3:[A-Za-z0-9._-]+/[A-Za-z0-9._-]+\.git$ ]] ||
-        die 'Use the deploy-key remote git@github-ender3:OWNER/REPO.git.'
+    if [[ ! $1 =~ ^https://github\.com/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+\.git$ &&
+          ! $1 =~ ^git@github-ender3:[A-Za-z0-9._-]+/[A-Za-z0-9._-]+\.git$ ]]; then
+        die 'Use https://github.com/OWNER/REPO.git or git@github-ender3:OWNER/REPO.git.'
+    fi
     git check-ref-format --branch "$2" >/dev/null || die 'Invalid branch.'
     [[ $2 =~ ^[A-Za-z0-9._/-]+$ ]] || die 'Unsupported branch name.'
 }
