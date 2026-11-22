@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 
 data_dir="$HOME/printer_data"
-active="$data_dir/config"
-checkout_name=ender3
+config_dir="$data_dir/config"
+checkout="$config_dir/ender3"
 default_origin=https://github.com/lazytesting/klipper-chart.git
 default_branch=main
 
@@ -11,65 +11,59 @@ die() {
     exit 1
 }
 
-check_origin_and_branch() {
-    if [[ ! $1 =~ ^https://github\.com/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+\.git$ &&
-          ! $1 =~ ^git@github-ender3:[A-Za-z0-9._-]+/[A-Za-z0-9._-]+\.git$ ]]; then
+clone_checkout() {
+    local origin=$1 branch=$2
+    if [[ ! $origin =~ ^https://github\.com/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+\.git$ &&
+          ! $origin =~ ^git@github-ender3:[A-Za-z0-9._-]+/[A-Za-z0-9._-]+\.git$ ]]; then
         die 'Use https://github.com/OWNER/REPO.git or git@github-ender3:OWNER/REPO.git.'
     fi
-    git check-ref-format --branch "$2" >/dev/null || die 'Invalid branch.'
-    [[ $2 =~ ^[A-Za-z0-9._/-]+$ ]] || die 'Unsupported branch name.'
-}
-
-clone_checkout() {
-    check_origin_and_branch "$1" "$2"
-    GIT_TERMINAL_PROMPT=0 git clone --branch "$2" -- "$1" "$3"
+    git check-ref-format --branch "$branch" >/dev/null || die 'Invalid branch.'
+    GIT_TERMINAL_PROMPT=0 git clone --branch "$branch" -- "$origin" "$3"
 }
 
 check_candidate() {
-    local config_dir=$1
-    local unresolved status
-    [[ -f $config_dir/printer.cfg && ! -L $config_dir/printer.cfg ]] ||
-        die 'The candidate printer.cfg must be a regular file.'
-    if git -C "$config_dir" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-        die 'The local config is inside a Git worktree. Move it outside Git before applying.'
-    fi
-    [[ -f $config_dir/$checkout_name/config/printer-managed.cfg ]] ||
-        die 'The managed include is missing.'
-    if unresolved=$(git -C "$config_dir/$checkout_name" grep -nE 'REPLACE_[A-Z0-9_]+' -- config); then
+    local candidate=$1 unresolved status
+    [[ -f $candidate/printer.cfg && ! -L $candidate/printer.cfg ]] ||
+        die 'The tracked printer.cfg must be a regular file.'
+    if unresolved=$(git -C "$candidate" grep -nE 'REPLACE_[A-Z0-9_]+' -- '*.cfg'); then
         printf '%s\n' "$unresolved" >&2
-        die 'Confirm the listed hardware settings on GitHub and stage again.'
+        die 'Commit the confirmed values to GitHub and stage again.'
     else
-        [[ $? == 1 ]] || die 'Could not inspect managed configuration for placeholders.'
+        [[ $? == 1 ]] || die 'Could not inspect the staged configuration.'
     fi
-    status=$(git -C "$config_dir/$checkout_name" status --porcelain)
-    [[ -z $status ]] ||
-        die 'The managed checkout has uncommitted changes.'
+    status=$(git -C "$candidate" status --porcelain)
+    [[ -z $status ]] || die 'The staged checkout has uncommitted changes.'
 }
 
 apply_candidate() {
-    local candidate unit state backup=''
+    local candidate unit state backup
     candidate=$(realpath -- "$1")
-    [[ $(dirname -- "$candidate") == "$(realpath -- "$data_dir")" && ${candidate##*/} == ender3-stage.* ]] ||
-        die 'Provide an installer or recovery stage directory under ~/printer_data.'
+    [[ $(dirname -- "$candidate") == "$(realpath -- "$data_dir")" &&
+        ${candidate##*/} == ender3-stage.* ]] ||
+        die 'Expected a staged checkout under ~/printer_data.'
     check_candidate "$candidate"
     for unit in klipper.service moonraker.service; do
         state=$(systemctl show --property=ActiveState --value "$unit") ||
             die "Cannot verify the state of $unit."
         [[ $state == inactive || $state == failed ]] ||
-            die "Stop $unit before applying the staged configuration."
+            die "Stop $unit before applying the staged checkout."
     done
-    [[ ! -L $active ]] || die 'The active config is a symlink. Use the manual steps.'
-    if [[ -e $active ]]; then
-        backup=$(mktemp -d "$data_dir/ender3-before.XXXXXXXX")
-        mv -T -- "$active" "$backup/config"
-        printf 'Previous config saved at %s/config\n' "$backup"
+    [[ -d $config_dir && ! -L $config_dir ]] || die 'Expected a regular printer_data/config directory.'
+    backup=$(mktemp -d "$data_dir/ender3-before.XXXXXXXX")
+    tar -czf "$backup/config.tar.gz" -C "$data_dir" config
+    if [[ -d $data_dir/systemd ]]; then
+        cp -a -- "$data_dir/systemd" "$backup/"
     fi
-    if ! mv -T -- "$candidate" "$active"; then
-        if [[ -n $backup ]]; then
-            mv -T -- "$backup/config" "$active" ||
-                die "Cannot restore automatically. The previous config is at $backup/config."
+    printf 'Previous config and available service environment saved at %s\n' "$backup"
+    if [[ -e $checkout || -L $checkout ]]; then
+        mv -T -- "$checkout" "$backup/previous-checkout"
+    fi
+    if ! mv -T -- "$candidate" "$checkout"; then
+        if [[ -e $backup/previous-checkout || -L $backup/previous-checkout ]]; then
+            mv -T -- "$backup/previous-checkout" "$checkout" ||
+                die "Restore the previous checkout from $backup."
         fi
-        die 'Could not place the staged config.'
+        die 'Could not install the staged checkout.'
     fi
-    printf 'Installed at %s. Services are still stopped.\n' "$active"
+    printf 'Installed at %s. Services are still stopped.\n' "$checkout"
 }
